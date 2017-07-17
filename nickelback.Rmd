@@ -1,0 +1,113 @@
+---
+title: "Analyzing Nickelback's Lyrics"
+author: "Matt M"
+subtitle: "A Web-Scraping and Text Analysis Tutorial"
+output: html_notebook
+---
+
+## Background
+Nickelback's music is arguably one of the worst exports that Canada has ever produced. It's rumored that Nickelback was created by God as payback for the sins of mankind. In a ranking by Gitmo detainees, Nickelback was ranked as the third-worst torture device (Acid drips on bare skin was #1 and electrocution was #2). But in all seriousness, my colleagues and I were curious about how Nickelback is actually a commercially-viable band. With all the recycled content and rhyming for the sake of rhyming, you'd think people would have just stopped listening.  
+
+To better understand Nickelback, I've decided to take one for the team and scrape their lyrics and perform some text analysis.  
+
+## Setting-Up for Scraping and Text Analysis
+### Special functions
+As always, special functions are specified first. `wipe_html` is handy for eliminating annoying HTML tags. It essentially takes a HTML string, cleans out the HTML tags, and returns the non-HTML contents of that string. It'll come in handy in any web-scraping you do, so I highly recommend you hang onto it.
+```{r}
+# function to scrub html out of text ----
+wipe_html <- function(str_html) {
+        gsub("<.*?>", "", str_html)
+}
+```
+
+### Libraries
+I'll be using Hadley Wickham's `dplyr` and `rvest`. `dplyr` is the gold standard for R data wrangling, and `rvest` is just convenient for scraping web data.
+```{r}
+# libraries ----
+library(rvest)
+library(dplyr)
+```
+
+### Web-Scraping
+#### Get the song list
+Finding a song list that wasn't totally jacked up took a little searching. I settled on MetroLyrics as the songs were cleanly listed and duplicates weren't found. I can't vouch that these are all of Nickelback's songs, but what do you care? It's Nickelback.  
+
+This code chunk scrapes the table with the song titles, selects the name of the song and the year it was released, and creates a column called `url_name` that I'll need in the next code chunk.  
+```{r}
+# get the HTML code from metrolyrics ----
+songs_url <- "http://www.metrolyrics.com/nickelback-lyrics.html"
+html_code <- read_html(songs_url)
+
+# get songs from song title HTML table ----
+html_songs <- html_node(html_code, "#popular > div > table")
+songs_df <- html_table(html_songs)
+
+# drop name column to lowercase and remove columns ----
+names(songs_df) <- tolower(names(songs_df))
+songs_df <- songs_df %>% select(name, year)
+
+# clean up the songs_df "song_title" variable ----
+songs_df_clean <- songs_df %>% 
+        mutate(url_name = gsub("\\'|\\.|&", "", name),
+               url_name = gsub("\\(|\\)", " ", url_name),
+               url_name = tolower(url_name),
+               url_name = gsub(" ", "-", url_name),
+               url_name = gsub("--", "-", url_name))
+```
+
+### Getting the lyrics
+Looping over the `url_name` variable from the previous code chunk made the most sense for this.  
+
+In this code chunk, I'll create two empty vectors for the lyrics and album names. My `for`-loop will then loop over each element in `url_name`, paste it into a hyperlink, scrape the lyrics and album name, scrub out the HTML, and place each captured piece into their respective vectors. The data frame `album_lyrics` will hold the contents of both vectors.
+```{r}
+# navigate to each song's URL and scrape the album name and lyrics ----
+## empty vectors
+lyrics <- c()
+album <- c()
+## specify row number to add to data frame
+number <- 1
+## for-loop and create data frame from the two vectors
+for(i in seq_along(songs_df_clean$url_name)) {
+        for_url_name <- songs_df_clean$url_name[i]
+        ## filter for row with song title
+        sub_row <- filter(songs_df_clean, url_name == for_url_name)
+        ## create url
+        paste_url <- paste0("http://www.metrolyrics.com/", for_url_name,
+                            "-nickelback.html")
+        ## open connection to url
+        for_html_code <- read_html(paste_url)
+        ## scrape lyrics via selector path
+        for_lyrics <- html_node(for_html_code, "#lyrics-body-text")
+        ## scrub html and control characters out of the lyrics
+        for_lyrics <- wipe_html(for_lyrics)
+        for_lyrics <- gsub("[[:cntrl:]]", " ", for_lyrics)
+        ## scrape album name
+        for_album <- html_node(for_html_code, "#album-name-link")
+        ## scrub html out of album name
+        for_album <- wipe_html(for_album)
+        ## add for_lyrics and for_album to respective vectors 
+        lyrics[number] <- for_lyrics
+        album[number] <- for_album
+        number <- number + 1
+        ## optional: add in 5 second delay to avoid IP block
+        #Sys.sleep(5)
+}
+album_lyrics <- data.frame(album = album, lyrics = lyrics)
+
+# bind data frames together ----
+if(nrow(songs_df_clean) != nrow(album_lyrics)) {
+        stop("data frames have different number of rows")
+} else {
+        nb_data <- bind_cols(songs_df_clean, album_lyrics)
+}
+```
+
+### Look at the Data
+There are 75 rows in this data frame, but I'll show the first 10 only.
+```{r}
+# show the first 10 rows of nb_data ----
+nb_data[1:10, ]
+```
+
+#### Up Next: Text analysis of the lyrics
+When I get some more time this week or next, I'll walk through how to preprocess the lyrics and do some basic text analytics.
